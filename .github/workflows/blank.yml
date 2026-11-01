@@ -1,0 +1,109 @@
+
+name: ATP VMachine ROM Builder
+
+on:
+  workflow_dispatch:
+    inputs:
+      android_version:
+        description: "Android guest version"
+        required: true
+        type: choice
+        options:
+          - "5.1"
+          - "6.0"
+          - "7.1"
+          - "8.1"
+          - "9"
+          - "10"
+          - "11"
+          - "12"
+
+      architecture:
+        description: "Guest architecture"
+        required: true
+        type: choice
+        options:
+          - arm64
+          - arm32
+
+permissions:
+  contents: write
+
+jobs:
+  build-rom:
+    name: Build and publish ROM
+    runs-on: [self-hosted, linux, x64, android-rom-builder]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read build configuration
+        id: config
+        shell: bash
+        run: |
+          VERSION="${{ inputs.android_version }}"
+          ARCH="${{ inputs.architecture }}"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "arch=$ARCH" >> "$GITHUB_OUTPUT"
+
+      - name: Build QEMU-compatible Android ROM
+        shell: bash
+        run: |
+          chmod +x scripts/build.sh
+          ./scripts/build.sh \
+            "${{ steps.config.outputs.version }}" \
+            "${{ steps.config.outputs.arch }}"
+
+      - name: Verify ROM files
+        shell: bash
+        run: |
+          chmod +x scripts/verify.sh
+          ./scripts/verify.sh "dist"
+
+      - name: Package ROM
+        shell: bash
+        run: |
+          mkdir -p release
+
+          cd dist
+          zip -r "../release/atp-android-${{ steps.config.outputs.version }}-${{ steps.config.outputs.arch }}.zip" .
+          cd ..
+
+          cp -r dist/* release/
+
+          cd release
+          sha256sum * > SHA256SUMS
+          cd ..
+
+      - name: Create release tag
+        id: tag
+        shell: bash
+        run: |
+          TAG="v${{ steps.config.outputs.version }}-${{ steps.config.outputs.arch }}-${GITHUB_RUN_NUMBER}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+
+          gh release create "$TAG" \
+            --title "ATP Android ${{ steps.config.outputs.version }} (${{ steps.config.outputs.arch }})" \
+            --notes "ATP VMachine QEMU-compatible Android ROM.
+
+          Android: ${{ steps.config.outputs.version }}
+          Architecture: ${{ steps.config.outputs.arch }}
+          Build: $GITHUB_RUN_NUMBER"
+
+          gh release upload "$TAG" release/*
+
+      - name: Build summary
+        run: |
+          echo "## ATP VMachine ROM Published" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Android: ${{ steps.config.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Architecture: ${{ steps.config.outputs.arch }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Release: ${{ steps.tag.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
