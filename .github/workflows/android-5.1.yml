@@ -1,0 +1,56 @@
+
+name: ATP VMachine - Android 5.1 ARM64
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-android-5:
+    name: Build Android 5.1 ARM64
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check build environment
+        run: |
+          echo "Checking build machine..."
+          free -h
+          df -h
+          command -v repo
+          java -version
+
+      - name: Build Android 5.1
+        run: |
+          chmod +x scripts/build-android-5.1.sh
+          ./scripts/build-android-5.1.sh
+
+      - name: Generate ZIP and checksums
+        run: |
+          mkdir -p release
+          cp dist/atp-android-5.1-arm64.zip release/
+          cd release
+          sha256sum *.zip > SHA256SUMS
+
+      - name: Publish ROM Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-5.1-arm64-${{ github.run_number }}
+          name: ATP Android 5.1 ARM64
+          body: |
+            ATP VMachine Android 5.1 ARM64 build.
+
+            Architecture: ARM64
+            Build: ${{ github.run_number }}
+
+            Check SHA256SUMS before installing.
+          files: |
+            release/atp-android-5.1-arm64.zip
+            release/SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
