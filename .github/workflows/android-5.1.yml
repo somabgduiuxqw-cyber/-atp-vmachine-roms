@@ -2,6 +2,7 @@
 name: ATP VMachine - Android 5.1 ARM64
 
 on:
+  push:
   workflow_dispatch:
 
 permissions:
