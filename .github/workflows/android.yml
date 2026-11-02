@@ -1,7 +1,8 @@
 name: Build and Release Rooted VineOS Android 7 .vrom
 
 on:
-  workflow_dispatch: # Allows manual trigger from the Actions tab
+  push:
+  workflow_dispatch:
 
 jobs:
   build-vrom:
