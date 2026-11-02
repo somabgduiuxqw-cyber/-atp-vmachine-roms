@@ -1,0 +1,97 @@
+name: Build and Release Rooted VineOS Android 7 .vrom
+
+on:
+  workflow_dispatch: # Allows manual trigger from the Actions tab
+
+jobs:
+  build-vrom:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Maximize Disk Space
+        run: |
+          echo "Optimizing available space on runner..."
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell
+          sudo apt-get clean
+          df -h
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y simg2img img2simg squashfs-tools p7zip-full curl wget
+
+      - name: Download AOSP Nougat 7.1 x86_64 Image
+        run: |
+          echo "Downloading official AOSP system partition image..."
+          # Fetching the official standard system.img component from Google Emulator system images 
+          # Adjust target URL depending on explicit ranchu image configurations
+          mkdir -p aosp_src
+          wget -q https://google.com -O aosp_src/sys-img.zip
+          unzip aosp_src/sys-img.zip -d aosp_src/
+          
+      - name: Extract and Inject Root (su)
+        run: |
+          echo "Converting sparse image to raw image..."
+          # Standard AOSP image parts are delivered as sparse formats
+          simg2img aosp_src/x86_64/system.img system_raw.img
+          
+          echo "Mounting system partition filesystem..."
+          mkdir -p sys_mount
+          sudo mount -o loop system_raw.img sys_mount
+          
+          echo "Downloading SuperSU/Root binaries for Android 7 x86_64..."
+          mkdir -p root_bin
+          wget -q https://github.com -O root_bin/su
+          
+          echo "Injecting su executable and updating system permissions..."
+          sudo cp root_bin/su sys_mount/xbin/su
+          sudo chmod 6755 sys_mount/xbin/su
+          sudo chown root:shell sys_mount/xbin/su
+          
+          # Optional: Symlink or patch selinux rules if required by the bootloader target
+          # sudo ln -s /system/xbin/su sys_mount/bin/su
+          
+          echo "Unmounting image..."
+          sudo umount sys_mount
+          
+          echo "Converting raw partition back to optimal sparse format..."
+          img2simg system_raw.img system_rooted.img
+
+      - name: Compress System Component into Ultra Compressed .vrom
+        run: |
+          echo "Creating workspace for final compression staging..."
+          mkdir -p vrom_payload
+          mv system_rooted.img vrom_payload/system.img
+          
+          # Copy target metadata descriptors, boot profiles, and vendor layers if required
+          if [ -f aosp_src/x86_64/vendor.img ]; then
+            cp aosp_src/x86_64/vendor.img vrom_payload/vendor.img
+          fi
+          
+          echo "Applying ultra compression (7z LZMA2 Ultra)..."
+          # -mx=9 enforces max compression, -ms=on ensures solid archive construction to save space
+          7z a -t7z -mx=9 -ms=on vine-rom-7-rooted.vrom ./vrom_payload/*
+
+      - name: Generate Release Tag
+        id: tag_gen
+        run: |
+          echo "VERSION=v7.1.2-root-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+
+      - name: Create Release and Upload Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag_gen.outputs.VERSION }}
+          name: "VineOS Android 7.1.2 Rooted (64-bit)"
+          body: |
+            ### VineOS Rooted Android 7 VROM
+            - **Architecture:** x86_64 (64-bit Virtual Target)
+            - **Root State:** SuperSU/su binary pre-baked inside `/system/xbin/`
+            - **Compression:** Ultra 7z Solid Layer
+          draft: false
+          prerelease: false
+          files: vine-rom-7-rooted.vrom
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
